@@ -4,4 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+image = "0.25.4"
+pixels = "0.14.0"
+winit = { version = "0.30", features = ["rwh_05"]}
 xcap = "0.0.14"
