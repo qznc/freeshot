@@ -1,6 +1,8 @@
+use std::cmp::{max, min};
 use std::time::Instant;
 
-use image::{ImageBuffer, Rgba};
+use arboard::Clipboard;
+use image::{GenericImage, GenericImageView, ImageBuffer, Rgba};
 use pixels::{Pixels, SurfaceTexture};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
@@ -30,6 +32,37 @@ impl App {
             selection: vec![],
             pixels: None,
         }
+    }
+
+    fn selection_image(&self) -> ImageBuffer<Rgba<u8>, Vec<u8>> {
+        let iw = self.image.width();
+        let ih = self.image.height();
+        let mut min_x: u32 = iw;
+        let mut min_y: u32 = ih;
+        let mut max_x: u32 = 0;
+        let mut max_y: u32 = 0;
+        for pos in self.selection.clone() {
+            min_x = min(min_x, pos.x as u32);
+            min_y = min(min_y, pos.y as u32);
+            max_x = max(max_x, pos.x as u32);
+            max_y = max(max_y, pos.y as u32);
+        }
+        println!("Selection size is {} x {}", max_x - min_x, max_y - min_y);
+        let mut image: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::new(max_x - min_x, max_y - min_y);
+        let inside_mask = selection_mask(iw as usize, ih as usize, &self.selection);
+        for y in min_y..max_y {
+            for x in min_x..max_x {
+                unsafe {
+                    let pixel = self.image.unsafe_get_pixel(x, y);
+                    let i = (y * iw) + x;
+                    if inside_mask[i as usize] {
+                        image.unsafe_put_pixel(x - min_x, y - min_y, pixel);
+                    }
+                }
+            }
+        }
+        image
     }
 }
 
@@ -95,7 +128,6 @@ impl ApplicationHandler for App {
                 let now = Instant::now();
                 let elapsed = now - self.last_selection_event;
                 if self.selecting && elapsed.as_millis() >= 100 {
-                    println!("Push position {:?}", position);
                     self.selection.push(position);
                     // redraw to make the selection visible correctly
                     self.window.as_ref().unwrap().request_redraw();
@@ -108,14 +140,14 @@ impl ApplicationHandler for App {
                 button: _,
             } => {
                 if state.is_pressed() {
-                    println!("Mouse down");
                     self.selecting = true;
                     self.selection = vec![];
                 } else {
-                    // released
                     println!("Mouse up, finishing");
                     self.selecting = false;
-                    event_loop.exit();
+                    provide_image_for_pasting(&self.selection_image());
+                    // keep process alive for pasting!
+                    //event_loop.exit();
                 }
             }
             _ => (),
@@ -171,6 +203,19 @@ fn selection_mask(width: usize, height: usize, polygon: &Vec<PhysicalPosition<f6
         }
     }
     mask
+}
+
+fn provide_image_for_pasting(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
+    let mut clipboard = Clipboard::new().unwrap();
+    let raw_rgba = image.clone().into_raw();
+    let clip_image = arboard::ImageData {
+        width: image.width() as usize,
+        height: image.height() as usize,
+        bytes: std::borrow::Cow::Owned(raw_rgba),
+    };
+    clipboard.set_image(clip_image).unwrap();
+    println!("Image copied to clipboard!");
+    // TODO keep process alive?!
 }
 
 fn main() {
