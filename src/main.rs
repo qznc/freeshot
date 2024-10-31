@@ -16,6 +16,7 @@ struct App {
     selecting: bool,
     last_selection_event: Instant,
     selection: Vec<PhysicalPosition<f64>>,
+    pixels: Option<Pixels>,
 }
 
 impl App {
@@ -27,6 +28,7 @@ impl App {
             selecting: false,
             last_selection_event: Instant::now(),
             selection: vec![],
+            pixels: None,
         }
     }
 }
@@ -48,16 +50,18 @@ impl ApplicationHandler for App {
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                println!("Draw! Selection length is {}", self.selection.len());
-
                 let w = self.window.as_ref().unwrap();
                 let _window_size = w.inner_size();
                 let iw = self.image.width();
                 let ih = self.image.height();
-                let surface_texture = SurfaceTexture::new(iw, ih, &w);
-                let mut pixels = Pixels::new(iw, ih, surface_texture).unwrap();
+                if self.pixels.is_none() {
+                    let surface_texture = SurfaceTexture::new(iw, ih, &w);
+                    let pixels = Pixels::new(iw, ih, surface_texture).unwrap();
+                    self.pixels = Some(pixels);
+                }
+                let pixels = self.pixels.as_mut().unwrap();
                 let frame = pixels.frame_mut();
-                let start = Instant::now();
+                // TODO the following can probably be done faster somehow?!
                 if self.selection.len() >= 3 {
                     let inside_mask = selection_mask(iw as usize, ih as usize, &self.selection);
                     for (i, rgba) in self.image.pixels().enumerate() {
@@ -81,7 +85,6 @@ impl ApplicationHandler for App {
                         frame[i * 4 + 3] = color[3];
                     }
                 }
-                println!("Drawing took {} ms", start.elapsed().as_millis());
                 pixels.render().expect("rendered");
             }
             WindowEvent::CursorMoved {
