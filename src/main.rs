@@ -57,20 +57,31 @@ impl ApplicationHandler for App {
                 let surface_texture = SurfaceTexture::new(iw, ih, &w);
                 let mut pixels = Pixels::new(iw, ih, surface_texture).unwrap();
                 let frame = pixels.frame_mut();
-                for (i, rgba) in self.image.pixels().enumerate() {
-                    let x: f64 = i as f64 % iw as f64;
-                    let y: f64 = i as f64 / iw as f64;
-                    let color: &Rgba<u8> = rgba;
-                    frame[i * 4 + 0] = color[0];
-                    frame[i * 4 + 1] = color[1];
-                    frame[i * 4 + 2] = color[2];
-                    // reduce alpha if outside of selection
-                    if is_inside(x, y, &self.selection) {
+                let start = Instant::now();
+                if self.selection.len() >= 3 {
+                    let inside_mask = selection_mask(iw as usize, ih as usize, &self.selection);
+                    for (i, rgba) in self.image.pixels().enumerate() {
+                        let color: &Rgba<u8> = rgba;
+                        frame[i * 4 + 0] = color[0];
+                        frame[i * 4 + 1] = color[1];
+                        frame[i * 4 + 2] = color[2];
+                        // reduce alpha if outside of selection
+                        if inside_mask[i] {
+                            frame[i * 4 + 3] = color[3];
+                        } else {
+                            frame[i * 4 + 3] = color[3] / 2;
+                        }
+                    }
+                } else {
+                    for (i, rgba) in self.image.pixels().enumerate() {
+                        let color: &Rgba<u8> = rgba;
+                        frame[i * 4 + 0] = color[0];
+                        frame[i * 4 + 1] = color[1];
+                        frame[i * 4 + 2] = color[2];
                         frame[i * 4 + 3] = color[3];
-                    } else {
-                        frame[i * 4 + 3] = color[3] / 2;
                     }
                 }
+                println!("Drawing took {} ms", start.elapsed().as_millis());
                 pixels.render().expect("rendered");
             }
             WindowEvent::CursorMoved {
@@ -109,35 +120,54 @@ impl ApplicationHandler for App {
     }
 }
 
-// Function to check if point (x, y) is inside the polygon
-fn is_inside(x: f64, y: f64, polygon: &Vec<PhysicalPosition<f64>>) -> bool {
+fn selection_mask(width: usize, height: usize, polygon: &Vec<PhysicalPosition<f64>>) -> Vec<bool> {
+    let mut mask = vec![false; width * height];
     let len = polygon.len();
-    if len == 0 {
-        // no selection -> always inside
-        return true;
-    }
     if len < 3 {
-        return false; // A polygon must have at least 3 vertices
+        return mask;
     }
-    let mut intersections = 0;
 
-    // Iterate through each edge of the polygon
-    for i in 0..len {
-        let j = (i + 1) % len;
-        let (p1, p2) = (&polygon[i], &polygon[j]);
+    // Find bounding box for the polygon
+    let min_y = polygon.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+    let max_y = polygon
+        .iter()
+        .map(|p| p.y)
+        .fold(f64::NEG_INFINITY, f64::max);
 
-        // Check if the ray intersects the edge
-        if (p1.y > y) != (p2.y > y) {
-            let slope = (p2.x - p1.x) / (p2.y - p1.y);
-            let intersect_x = p1.x + (y - p1.y) * slope;
+    // Limit scan lines to within the image height
+    let min_y = min_y.max(0.0).ceil() as usize;
+    let max_y = max_y.min((height - 1) as f64).floor() as usize;
 
-            if x < intersect_x {
-                intersections += 1;
+    for y in min_y..=max_y {
+        let mut intersections = Vec::new();
+
+        for i in 0..len {
+            let j = (i + 1) % len;
+            let (p1, p2) = (&polygon[i], &polygon[j]);
+
+            if (p1.y <= y as f64 && p2.y > y as f64) || (p2.y <= y as f64 && p1.y > y as f64) {
+                let slope = (p2.x - p1.x) / (p2.y - p1.y);
+                let intersect_x = p1.x + (y as f64 - p1.y) * slope;
+                intersections.push(intersect_x);
+            }
+        }
+
+        intersections.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        for span in intersections.chunks(2) {
+            if let [start, end] = span {
+                let start = start.max(0.0).ceil() as usize;
+                let end = end.min((width - 1) as f64).floor() as usize;
+
+                for x in start..=end {
+                    if x < width {
+                        mask[y * width + x] = true;
+                    }
+                }
             }
         }
     }
-
-    intersections % 2 != 0
+    mask
 }
 
 fn main() {
