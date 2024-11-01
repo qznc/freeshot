@@ -68,8 +68,8 @@ impl App {
 
 impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        let height = self.image.height() * 10 / 15;
-        let width = self.image.width() * 10 / 15;
+        let height = self.image.height() * 10 / 11;
+        let width = self.image.width() * 10 / 11;
         let attr = Window::default_attributes()
             .with_title("Freeshot!")
             .with_inner_size(LogicalSize::new(width, height));
