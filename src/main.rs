@@ -1,9 +1,8 @@
-use std::cmp::{max, min};
-use std::time::Instant;
-
 use arboard::Clipboard;
 use image::{GenericImage, GenericImageView, ImageBuffer, Rgba};
 use pixels::{Pixels, SurfaceTexture};
+use std::cmp::{max, min};
+use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition};
 use winit::event::WindowEvent;
@@ -47,7 +46,6 @@ impl App {
             max_x = max(max_x, pos.x as u32);
             max_y = max(max_y, pos.y as u32);
         }
-        println!("Selection size is {} x {}", max_x - min_x, max_y - min_y);
         let mut image: ImageBuffer<Rgba<u8>, Vec<u8>> =
             ImageBuffer::new(max_x - min_x, max_y - min_y);
         let inside_mask = selection_mask(iw as usize, ih as usize, &self.selection);
@@ -64,6 +62,45 @@ impl App {
         }
         image
     }
+
+    fn redraw(&mut self) {
+        let w = self.window.as_ref().unwrap();
+        let _window_size = w.inner_size();
+        let iw = self.image.width();
+        let ih = self.image.height();
+        if self.pixels.is_none() {
+            let surface_texture = SurfaceTexture::new(iw, ih, &w);
+            let pixels = Pixels::new(iw, ih, surface_texture).unwrap();
+            self.pixels = Some(pixels);
+        }
+        let pixels = self.pixels.as_mut().unwrap();
+        let frame = pixels.frame_mut();
+        // TODO the following can probably be done faster somehow?!
+        if self.selection.len() >= 3 {
+            let inside_mask = selection_mask(iw as usize, ih as usize, &self.selection);
+            for (i, rgba) in self.image.pixels().enumerate() {
+                let color: &Rgba<u8> = rgba;
+                frame[i * 4 + 0] = color[0];
+                frame[i * 4 + 1] = color[1];
+                frame[i * 4 + 2] = color[2];
+                // reduce alpha if outside of selection
+                if inside_mask[i] {
+                    frame[i * 4 + 3] = color[3];
+                } else {
+                    frame[i * 4 + 3] = color[3] / 2;
+                }
+            }
+        } else {
+            for (i, rgba) in self.image.pixels().enumerate() {
+                let color: &Rgba<u8> = rgba;
+                frame[i * 4 + 0] = color[0];
+                frame[i * 4 + 1] = color[1];
+                frame[i * 4 + 2] = color[2];
+                frame[i * 4 + 3] = color[3];
+            }
+        }
+        pixels.render().expect("rendered");
+    }
 }
 
 impl ApplicationHandler for App {
@@ -79,46 +116,10 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => {
-                println!("The close button was pressed; stopping");
                 event_loop.exit();
             }
             WindowEvent::RedrawRequested => {
-                let w = self.window.as_ref().unwrap();
-                let _window_size = w.inner_size();
-                let iw = self.image.width();
-                let ih = self.image.height();
-                if self.pixels.is_none() {
-                    let surface_texture = SurfaceTexture::new(iw, ih, &w);
-                    let pixels = Pixels::new(iw, ih, surface_texture).unwrap();
-                    self.pixels = Some(pixels);
-                }
-                let pixels = self.pixels.as_mut().unwrap();
-                let frame = pixels.frame_mut();
-                // TODO the following can probably be done faster somehow?!
-                if self.selection.len() >= 3 {
-                    let inside_mask = selection_mask(iw as usize, ih as usize, &self.selection);
-                    for (i, rgba) in self.image.pixels().enumerate() {
-                        let color: &Rgba<u8> = rgba;
-                        frame[i * 4 + 0] = color[0];
-                        frame[i * 4 + 1] = color[1];
-                        frame[i * 4 + 2] = color[2];
-                        // reduce alpha if outside of selection
-                        if inside_mask[i] {
-                            frame[i * 4 + 3] = color[3];
-                        } else {
-                            frame[i * 4 + 3] = color[3] / 2;
-                        }
-                    }
-                } else {
-                    for (i, rgba) in self.image.pixels().enumerate() {
-                        let color: &Rgba<u8> = rgba;
-                        frame[i * 4 + 0] = color[0];
-                        frame[i * 4 + 1] = color[1];
-                        frame[i * 4 + 2] = color[2];
-                        frame[i * 4 + 3] = color[3];
-                    }
-                }
-                pixels.render().expect("rendered");
+                self.redraw();
             }
             WindowEvent::CursorMoved {
                 device_id: _,
@@ -143,11 +144,13 @@ impl ApplicationHandler for App {
                     self.selecting = true;
                     self.selection = vec![];
                 } else {
-                    println!("Mouse up, finishing");
-                    self.selecting = false;
-                    provide_image_for_pasting(&self.selection_image());
-                    // keep process alive for pasting!
-                    //event_loop.exit();
+                    if self.selection.len() >= 3 {
+                        self.selecting = false;
+                        provide_image_for_pasting(&self.selection_image());
+
+                        // keep process alive for pasting!
+                        //event_loop.exit();
+                    }
                 }
             }
             _ => (),
@@ -215,7 +218,6 @@ fn provide_image_for_pasting(image: &ImageBuffer<Rgba<u8>, Vec<u8>>) {
     };
     clipboard.set_image(clip_image).unwrap();
     println!("Image copied to clipboard!");
-    // TODO keep process alive?!
 }
 
 fn main() {
